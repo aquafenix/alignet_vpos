@@ -1,0 +1,780 @@
+<?php
+
+/**
+ * @file
+ * Alignet VPOS
+ * Process payments using the V-POS Service from Alignet Merchant Solution.
+ * 
+ * @see 
+ * 		http://vpos.alignet.com/documentacion.html
+ */
+
+// Include the V-POS Plugin.
+include("plugins/vpos_plugin.php");
+
+// Define the Alignet Plugin download URL.
+define('ALIGNET_WEBSITE_URL', 'http://vpos.alignet.com/documentacion.html');
+
+/**
+ * Implements hook_permission().
+ */
+function alignet_vpos_permission() {
+	return array(
+  	'administer alignet vpos' => array(
+  		'title' => t('Administer the Alignet VPOS Payment module'),
+    	'description' => t('Allows access to configure API Keys.'),
+  	),
+	);
+}
+
+/**
+ * Implements uc_payment_gateway().
+ */
+function alignet_vpos_uc_payment_gateway() {
+  $gateways['alignet_vpos'] = array(
+    'title' => t('Alignet Merchant Solution (AMS)'),
+    'description' => t('Process payments through AMS'),
+  );
+  return $gateways;
+}
+
+/**
+ * 
+ */
+function alignet_vpos_uc_payment_method() {
+
+  $title1 = theme('image', array(
+    'path' => drupal_get_path('module', 'alignet_vpos') . '/images/vpos_logo.gif')) . ' ' . t(' - pay securely without sharing your financial information.');
+  $title2 = '<br /><span id="alignet-vpos-includes">' . t('Includes:');
+  $cc_types = array(
+    'visa' => t('Visa'),
+	'mastercard' => t('MasterCard'),    
+  );
+
+  foreach ($cc_types as $type => $label) {
+    $title2 .= ' ' . theme('image', array(
+	  'path' => drupal_get_path('module', 'uc_credit') . '/images/' . $type . '.gif',
+      'alt' => $label,
+      'attributes' => array('class' => array('uc-credit-cctype', 'uc-credit-cctype-' . $type)),
+    ));
+  }
+
+  $methods[] = array(
+    'id' => 'alignet_vpos_gateway',
+    'name' => t('V-POS'),
+    'title' => $title1 . $title2,
+    'desc' => t('Pay with V-POS'),
+    'callback' => 'alignet_vpos_method',
+    'redirect' => 'alignet_vpos_form',
+    'weight' => 1,
+    'checkout' => TRUE,
+  );  
+  return $methods;
+}
+
+/**
+ * Implements 
+ */
+function alignet_vpos_method($op, &$order) {
+
+	// Validates if the plugin has been installed correctly.
+	$vpos_plugin_path = alignet_get_plugin_path();
+	if (!$vpos_plugin_path) {
+		drupal_set_message(t('The V-POS Plugin could not be detected, download the !vpos_plugin and extract the require archive into the %path directory on your server.',
+		array('!vpos_plugin' => l(t('V-POS Plugin'), ALIGNET_WEBSITE_URL), '%path' => 'sites/all/modules/alignet_vpos/plugins')
+		), 'error');
+		return;
+	}
+	
+	// Fieldsets into vertical tabs
+	$form['group-ams-vpos-settings'] = array(
+		'#type' => 'vertical_tabs',		
+	);
+
+	switch ($op) {
+    case 'settings':
+		  $form['alignet_vpos_settings_general'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('General'),
+				'#weight' => 1,
+				'#group' => 'group-ams-vpos-settings',
+	  	);
+		  $form['alignet_vpos_settings_rsa'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('RSA & Vector Keys'),
+				'#weight' => 2,
+				'#group' => 'group-ams-vpos-settings',	
+		  );	
+			$form['alignet_vpos_settings_other'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('Other settings'),
+				'#weight' => 3,
+				'#group' => 'group-ams-vpos-settings',
+		  );
+	  
+			/*
+			 * General settings
+			 */
+			$form['alignet_vpos_settings_general']['alignet_vpos_gateway_acquirerid'] = array(
+        '#type' => 'textfield',
+        '#title' => t('acquirerId'),
+        '#description' => t('Your merchants acquirerId'),
+        '#default_value' => variable_get('alignet_vpos_gateway_acquirerid'),
+				'#required' => TRUE,
+			);
+	  	$form['alignet_vpos_settings_general']['alignet_vpos_gateway_commerceid'] = array(
+      	'#type' => 'textfield',
+        '#title' => t('commerceId'),
+        '#description' => t('Your merchant commerceId'),
+        '#default_value' => variable_get('alignet_vpos_gateway_commerceid'),
+				'#required' => TRUE,
+      );
+	  	$form['alignet_vpos_settings_general']['alignet_vpos_gateway_terminalcode'] = array(
+        '#type' => 'textfield',
+        '#title' => t('terminalCode'),
+        '#description' => t('Your merchant terminalCode'),
+        '#default_value' => variable_get('alignet_vpos_gateway_terminalcode'),
+				'#required' => TRUE,
+      );	  
+	  	$form['alignet_vpos_settings_general']['alignet_vpos_checkout_label'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Checkout button label'),
+        '#description' => t('Customize the label of the final checkout button when the customer is about to pay.'),
+        '#default_value' => variable_get('alignet_vpos_checkout_label', t('Continue to V-POS')),	
+      );	  	  
+	  	
+			/*
+			 * RSA Settings
+			 */
+			$form['alignet_vpos_settings_rsa']['alignet_vpos_gateway_vectorkey'] = array(
+        '#type' => 'textfield',
+        '#title' => t('vectorKey'),
+        '#description' => t('Your merchant Vector Key'),
+        '#default_value' => variable_get('alignet_vpos_gateway_vectorkey'),
+				'#required' => TRUE,
+      );
+
+			/*
+			 * RSA Business Keys
+			 */
+			$form['alignet_vpos_settings_rsa']['business_keys'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('Business RSA Keys'),
+				'#collapsible' => TRUE,
+				'#collapsed' => FALSE,
+			);
+
+			$form['alignet_vpos_settings_rsa']['business_keys']['alignet_rsa_warning_message'] = array(
+				'#type' => 'item',
+				'#title' => t('RSA Keys'),
+				'#description' => t('You must generate a set of RSA Keys (Signature & Crypto).'),
+			);
+			
+			// RSA Keys for Testing server
+			$form['alignet_vpos_settings_rsa']['business_keys']['testing'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('Testing RSA Keys'),
+				'#collapsible' => TRUE,
+				'#collapsed' => TRUE,
+			);
+
+			// Private Signature RSA Key for your business
+			$form['alignet_vpos_settings_rsa']['business_keys']['testing']['alignet_vpos_gateway_llavePrivadaFirma_testing'] = array(
+				'#type' => 'textfield',
+				'#title' => t('Private RSA Signature Key'),
+				'#description' => t('Relative path to your private RSA Crypto Key. Ex. /home/yourhostingaccount/vpos_keys/'),
+				'#size'=> 90,
+				'#default_value' => variable_get('alignet_vpos_gateway_llavePrivadaFirma_testing'),
+				'#required' => FALSE,
+			);
+
+			// Private Crypto RSA Key for your business
+			$form['alignet_vpos_settings_rsa']['business_keys']['testing']['alignet_vpos_gateway_llavePrivadaCifrado_testing'] = array(
+				'#type' => 'textfield',
+				'#title' => t('Private RSA Crypto Key'),
+				'#description' => t('Relative path to your private RSA Crypto Key. Ex. /home/yourhostingaccount/vpos_keys/'),
+				'#size'=> 90,
+				'#default_value' => variable_get('alignet_vpos_gateway_llavePrivadaCifrado_testing'),
+				'#required' => FALSE,
+			);
+			
+			// RSA Keys for Testing server
+			$form['alignet_vpos_settings_rsa']['business_keys']['production'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('Production RSA Keys'),
+				'#collapsible' => TRUE,
+				'#collapsed' => TRUE,
+			);
+						
+			// Private Signature RSA Key for your business
+			$form['alignet_vpos_settings_rsa']['business_keys']['production']['alignet_vpos_gateway_llavePrivadaFirma_production'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Private RSA Signature Key'),
+        '#description' => t('Relative path to your private RSA Crypto Key. Ex. /home/yourhostingaccount/vpos_keys/'),
+        '#size'=> 90,
+				'#default_value' => variable_get('alignet_vpos_gateway_llavePrivadaFirma_production'),
+				'#required' => FALSE,
+      );
+			
+			// Private Crypto RSA Key for your business 
+			$form['alignet_vpos_settings_rsa']['business_keys']['production']['alignet_vpos_gateway_llavePrivadaCifrado_production'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Private RSA Crypto Key'),
+        '#description' => t('Relative path to your private RSA Crypto Key. Ex. /home/yourhostingaccount/vpos_keys/'),
+				'#size'=> 90,
+        '#default_value' => variable_get('alignet_vpos_gateway_llavePrivadaCifrado_production'),
+				'#required' => FALSE,
+			);
+
+			/*
+			 * RSA Alignet Keys
+			 */
+			$form['alignet_vpos_settings_rsa']['alignet_keys'] = array(
+					'#type' => 'fieldset',
+					'#title' => t('Alignet RSA Keys'),
+					'#collapsible' => TRUE,
+					'#collapsed' => FALSE,
+			);
+			
+			// RSA Keys for Testing server
+			$form['alignet_vpos_settings_rsa']['alignet_keys']['testing'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('Testing RSA Keys'),
+				'#collapsible' => TRUE,
+				'#collapsed' => TRUE,
+			);
+
+			// Public Signature RSA Key provided by Alignet.
+			$form['alignet_vpos_settings_rsa']['alignet_keys']['testing']['alignet_vpos_gateway_llavePublicaFirma_testing'] = array(
+	    	'#type' => 'textfield',
+	      '#title' => t('VPOS Public Signature Key'),
+	      '#description' => t('Path to Alignet VPOS Public RSA Signature Key. Ex. /home/yourhostingaccount/vpos_keys/'),
+				'#size'=> 90,
+	      '#default_value' => variable_get('alignet_vpos_gateway_llavePublicaFirma_testing'),
+				'#required' => FALSE,
+	    );
+	  
+			// Public Crypto RSA Key provided by Alignet.
+			$form['alignet_vpos_settings_rsa']['alignet_keys']['testing']['alignet_vpos_gateway_llavePublicaCifrado_testing'] = array(
+	    	'#type' => 'textfield',
+	      '#title' => t('VPOS Public Crypto Key'),
+	      '#description' => t('Path to Alignet VPOS Public RSA Crypto Key. Ex. /home/yourhostingaccount/vpos_keys/'),
+				'#size'=> 90,
+	      '#default_value' => variable_get('alignet_vpos_gateway_llavePublicaCifrado_testing'),
+				'#required' => FALSE,
+			);
+			
+			// RSA Keys for Production server.
+			$form['alignet_vpos_settings_rsa']['alignet_keys']['production'] = array(
+				'#type' => 'fieldset',
+				'#title' => t('Production RSA Keys'),
+				'#collapsible' => TRUE,
+				'#collapsed' => TRUE,
+			);
+			
+			// Public Signature RSA Key provided by Alignet.
+			$form['alignet_vpos_settings_rsa']['alignet_keys']['production']['alignet_vpos_gateway_llavePublicaFirma_production'] = array(
+				'#type' => 'textfield',
+				'#title' => t('VPOS Public Signature Key'),
+				'#description' => t('Path to Alignet VPOS Public RSA Signature Key. Ex. /home/yourhostingaccount/vpos_keys/'),
+				'#size'=> 90,
+				'#default_value' => variable_get('alignet_vpos_gateway_llavePublicaFirma_production'),
+				'#required' => FALSE,
+			);
+			 
+			// Public Crypto RSA Key provided by Alignet.
+			$form['alignet_vpos_settings_rsa']['alignet_keys']['production']['alignet_vpos_gateway_llavePublicaCifrado_production'] = array(
+				'#type' => 'textfield',
+				'#title' => t('VPOS Public Crypto Key'),
+				'#description' => t('Path to Alignet VPOS Public RSA Crypto Key. Ex. /home/yourhostingaccount/vpos_keys/'),
+				'#size'=> 90,
+				'#default_value' => variable_get('alignet_vpos_gateway_llavePublicaCifrado_production'),
+				'#required' => FALSE,
+			);
+	
+			/*
+			 * Other settings
+			 */
+			$form['alignet_vpos_settings_other']['alignet_vpos_gateway_url_choice'] = array(
+      	'#type' => 'select',
+       	'#title' => t('Production or Testing Gateway'),
+       	'#options' => array(
+        	0 => t('Testing'),
+          1 => t('Production'),
+				),
+				'#default_value' => variable_get('alignet_vpos_gateway_url_choice', ('0')),
+				'#description' => t('Set which <em>Gateway URL</em> option to use.'),	   
+			);
+	  	$form['alignet_vpos_settings_other']['alignet_vpos_gateway_production_url'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Production Gateway URL'),
+        '#description' => t('Your assigned Production URL'),
+        '#default_value' => variable_get('alignet_vpos_gateway_production_url'),
+				'#required' => false,
+      );
+	  	$form['alignet_vpos_settings_other']['alignet_vpos_gateway_test_url'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Testing Gateway URL'),
+        '#description' => t('Your assigned Testing URL'),
+        '#default_value' => variable_get('alignet_vpos_gateway_test_url'),
+				'#required' => false,
+      );	  
+	  	$form['alignet_vpos_settings_other']['alignet_vpos_gateway_reporting'] = array(
+      	'#type' => 'select',
+      	'#title' => t('Gateway Reporting'),
+      	'#options' => array(
+       		0 => t('False'),
+        	1 => t('True'),
+       	),
+       	'#default_value' => variable_get('alignet_vpos_gateway_reporting',0),
+       	'#description' => t('Set <em>Gateway Reporting</em>, usefull when troubleshooting with bank or Alignet! (Only users with set permissions will see messages.)'),
+			);
+			$form['alignet_vpos_settings_other']['alignet_vpos_currency'] = array(
+      	'#type' => 'select',
+        '#title' => t('Currency code'),
+        '#description' => t('Transactions can only be processed in the authorized currency established by your Bank.'),
+        '#options' => _alignet_vpos_currency_array(),
+        '#default_value' => variable_get('alignet_vpos_currency', 'USD'),
+			);
+			
+			$form['#validate'][] = 'alignet_vpos_payment_form_validate';
+      return $form;
+	}
+}
+
+/**
+ * hook_validate().
+ */
+function alignet_vpos_payment_form_validate($form, &$form_state) {
+
+	// Validate RSA Keys for Testing URL
+	if ($form_state['values']['alignet_vpos_gateway_url_choice'] == '0') {
+		if (empty($form_state['values']['alignet_vpos_gateway_llavePrivadaFirma_testing']) || empty($form_state['values']['alignet_vpos_gateway_llavePrivadaCifrado_testing'])) {
+			form_set_error('name', t('You are currently using the Test Server without Business RSA Keys.'));
+		}
+		if (empty($form_state['values']['alignet_vpos_gateway_llavePublicaFirma_testing']) || empty($form_state['values']['alignet_vpos_gateway_llavePublicaCifrado_testing'])) {
+			form_set_error('name', t('You are currently using the Test Server without Alignet RSA Keys.'));
+		}
+		if (empty($form_state['values']['alignet_vpos_gateway_test_url'])) {
+			form_set_error('name', t('You may not leave the Testing Gateway URL empty as you have selected to work with the Testing Gateway.'));
+		}
+	}
+	
+	// Validate RSA Keys for Production URL
+	if ($form_state['values']['alignet_vpos_gateway_url_choice'] == '1') {
+		if (empty($form_state['values']['alignet_vpos_gateway_llavePrivadaFirma_production']) || empty($form_state['values']['alignet_vpos_gateway_llavePrivadaCifrado_production'])) {
+			form_set_error('name', t('You are currently using the Production Server without Business RSA Keys.'));
+		}
+		if (empty($form_state['values']['alignet_vpos_gateway_llavePublicaFirma_production']) || empty($form_state['values']['alignet_vpos_gateway_llavePublicaCifrado_production'])) {
+			form_set_error('name', t('You are currently using the Production Server without Alignet RSA Keys.'));
+		}
+		if (empty($form_state['values']['alignet_vpos_gateway_production_url'])) {
+			form_set_error('name', t('You may not leave the Production Gateway URL empty as you have selected to work with the Production Gateway.'));
+		}
+	}
+
+	// Gateway Reporting: Warning message!
+	if ($form_state['values']['alignet_vpos_gateway_reporting'] == '1') {
+		drupal_set_message(t('You have chosen to use Gateway Reporting. This function will report the messages sent back from the Gateway and only users with set permissions will see them.'),'warning');
+	}
+}
+
+/**
+ * Implements hook_menu().
+ */
+function alignet_vpos_menu() {
+  // returns callback for complete payment
+	$items['cart/checkout/alignet/complete'] = array(
+  	'title' => 'Order complete',
+		'description' => 'Display information upon completion of an order.',
+    'page callback' => 'alignet_vpos_checkout_complete',
+		'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_form().
+ */
+function alignet_vpos_form($form, &$form_state, $order) {	
+  global $language;
+  global $user;
+	
+  /*
+   * Notice:
+   * 
+   * Alignet VPOS does not handle Spanish with the correct ISO 639-1 structure as Drupal does.
+   * So we must than change the value of $language from es to sp as is how they handle that variable.
+   */
+  if ($language->language == 'es') {
+    $language->language = 'sp';
+  }
+
+  // Gateway Reporting: Notify which Gateway URL is currently being use.
+  if (variable_get('alignet_vpos_gateway_reporting')==1 && user_access('administer alignet vpos')) {
+		if ((variable_get('alignet_vpos_gateway_url_choice')==0) || (variable_get('alignet_vpos_gateway_url_choice')==1)) {
+      if(variable_get('alignet_vpos_gateway_url_choice')==0) {
+	    	drupal_set_message(t('Currently using the Alignet TESTING gateway server.'),'status');
+	  	}
+	  	if(variable_get('alignet_vpos_gateway_url_choice')==1) {
+	    	drupal_set_message(t('Currently using the Alignet PRODUCTION gateway server.'),'status');
+	  	}
+		}
+	}
+  
+  // Collects order information
+  $arrayIn['acquirerId']= variable_get('alignet_vpos_gateway_acquirerid');
+  $arrayIn['commerceId']= variable_get('alignet_vpos_gateway_commerceid');
+  $arrayIn['terminalCode']= variable_get('alignet_vpos_gateway_terminalcode');
+  $arrayIn['purchaseAmount']= $order->order_total * 100;
+  $arrayIn['purchaseCurrencyCode']= variable_get('alignet_vpos_currency');
+  $arrayIn['purchaseOperationNumber']= $order->order_id;
+  $arrayIn['billingEMail']= $order->primary_email;
+  $arrayIn['billingFirstName']= substr($order->billing_first_name, 0, 25);
+  $arrayIn['billingLastName']= substr($order->billing_last_name, 0, 25);
+  $arrayIn['billingAddress']= substr($order->billing_street1, 0, 100);
+  $arrayIn['billingCity']= substr($order->billing_city, 0, 40);
+  $arrayIn['billingState']= uc_get_zone_code($order->billing_zone);
+  $arrayIn['billingCountry']= $order->billing_country;
+  $arrayIn['language']= $lang_name = $language->language;
+	  
+  $arrayOut='';
+  
+  // Vector Key
+  $VI = variable_get('alignet_vpos_gateway_vectorkey');
+  	
+  /*
+   * Get the correct RSA Keys for either Production or Testing
+   */
+  if (variable_get('alignet_vpos_gateway_url_choice') == '0') {
+  	// Public Crypto RSA Key provided by Alignet
+  	$llavePublicaCifrado = file_get_contents(variable_get('alignet_vpos_gateway_llavePublicaCifrado_testing'), true);
+  	
+  	// Private Signature RSA Key for your business
+  	$llavePrivadaFirma = file_get_contents(variable_get('alignet_vpos_gateway_llavePrivadaFirma_testing'), true);  	
+  }
+  
+  if (variable_get('alignet_vpos_gateway_url_choice') == '1') {
+  	// Public Crypto RSA Key provided by Alignet
+  	$llavePublicaCifrado = file_get_contents(variable_get('alignet_vpos_gateway_llavePublicaCifrado_production'), true);
+  	 
+  	// Private Signature RSA Key for your business
+  	$llavePrivadaFirma = file_get_contents(variable_get('alignet_vpos_gateway_llavePrivadaFirma_production'), true);
+  }	  
+
+  // Submit data
+  if (VPOSSend($arrayIn,$arrayOut,$llavePublicaCifrado,$llavePrivadaFirma,$VI)) {
+  } 
+  else {
+  	// Error may occur with the wrong configuration of the RSA & Vector Keys sent to the VPOS-Plugin.
+		drupal_set_message(t('There was a problem with your request!</br> Please contact the site administrator and mention VPOS Error: 101 in your message!'),'error');
+	}
+  
+  // Build the data to be send to the gateway
+  $data = array(
+  	'IDACQUIRER' => variable_get('alignet_vpos_gateway_acquirerid'),
+		'IDCOMMERCE' => variable_get('alignet_vpos_gateway_commerceid'),
+		'XMLREQ' => $arrayOut['XMLREQ'],
+		'DIGITALSIGN' => $arrayOut['DIGITALSIGN'],
+		'SESSIONKEY' => $arrayOut['SESSIONKEY'],
+  );
+   
+  // Create the form to submit the data.
+  foreach ($data as $name => $value) {
+		if (!empty($value)) {
+	  	$form[$name] = array('#type' => 'hidden', '#value' => $value);
+		}
+  }
+
+  // Select the gateway URL to use, either TESTING or PRODUCTION.
+  if (variable_get('alignet_vpos_gateway_url_choice')==0) {
+		$form['#action'] = variable_get('alignet_vpos_gateway_test_url');
+  }
+  elseif(variable_get('alignet_vpos_gateway_url_choice')==1) {
+    $form['#action'] = variable_get('alignet_vpos_gateway_production_url');
+  }
+  $form['actions'] = array('#type' => 'actions');
+  $form['actions']['submit'] = array(
+    '#type' => 'submit',
+		'#value' => variable_get('alignet_vpos_checkout_label'),
+  );
+  
+  return $form;
+}
+
+/**
+ * Implements uc_checkout_complete().
+ */
+function alignet_vpos_checkout_complete() {
+  global $user;
+  
+  // Loads the customers order info.
+  $order = uc_order_load(intval($_SESSION['cart_order']));
+  
+  // Display messages to customers and the administrator if the order was lost.
+  if (empty($order)) {
+    drupal_set_message(t('We are sorry for the inconvenience but an error occurred while processing your order that prevents us from completing it at this time. Your credit card may have been charged. Please contact us and we will resolve the issue as soon as possible.'), 'error');
+		watchdog('Alignet VPOS', 'An empty order made it to checkout! Cart order ID: @cart_order', array('@cart_order' => $_SESSION['cart_order']), WATCHDOG_ERROR);
+		drupal_goto('cart');
+  }
+  
+  // Ensure the payment method is alignet_vpos_gateway.
+  if ($order->payment_method != 'alignet_vpos_gateway') {
+    drupal_set_message(t('We are sorry for the inconvenience but an error occurred while processing your order that prevents us from completing it at this time. Your credit card may have been charged. Please contact us and we will resolve the issue as soon as possible.'), 'error');
+    watchdog('Alignet VPOS', 'Incorrect gateway return payment! Cart order ID: @cart_order', array('@cart_order' => $_SESSION['cart_order']), WATCHDOG_ERROR);
+    drupal_goto('cart');
+  }
+  
+  // VPOS-Plugin Unencrypt received data.
+  $arrayIn['IDACQUIRER'] = $_REQUEST['IDACQUIRER'];
+  $arrayIn['IDCOMMERCE'] = $_REQUEST['IDCOMMERCE'];
+  $arrayIn['XMLRES'] = $_REQUEST['XMLRES'];
+  $arrayIn['DIGITALSIGN'] = $_REQUEST['DIGITALSIGN'];
+  $arrayIn['SESSIONKEY'] = $_REQUEST['SESSIONKEY'];
+  $arrayOut = '';
+	
+  // Vector Key.
+  $VI = variable_get('alignet_vpos_gateway_vectorkey');
+
+  /*
+   * Get the correct RSA Keys for either Production or Testing
+  */
+  if (variable_get('alignet_vpos_gateway_url_choice') == '0') {
+  	// Public Signature RSA Key provided by Alignet.
+  	$llavePublicaFirma = file_get_contents(variable_get('alignet_vpos_gateway_llavePublicaFirma_testing'), true);
+  	
+  	// Private Crypto RSA Key for your business.
+  	$llavePrivadaCifrado = file_get_contents(variable_get('alignet_vpos_gateway_llavePrivadaCifrado_testing'), true);
+  }
+  
+  if (variable_get('alignet_vpos_gateway_url_choice') == '1') {
+  	// Public Signature RSA Key provided by Alignet.
+  	$llavePublicaFirma = file_get_contents(variable_get('alignet_vpos_gateway_llavePublicaFirma_testing'), true);
+  	
+  	// Private Crypto RSA Key for your business.
+  	$llavePrivadaCifrado = file_get_contents(variable_get('alignet_vpos_gateway_llavePrivadaCifrado_production'), true);
+  }
+	
+	if (VPOSResponse($arrayIn,$arrayOut,$llavePublicaFirma,$llavePrivadaCifrado,$VI)) {    
+		if (array_key_exists('authorizationCode', $arrayOut)) {
+	  	if (isset($arrayOut['authorizationCode'])) {
+	    	$authorizationCode = $arrayOut['authorizationCode'];
+	  	}
+		}
+		if (!array_key_exists('authorizationCode', $arrayOut)) {
+	  	$authorizationCode = 'NULL';
+		}
+		$purchaseOperationNumber = $arrayOut['purchaseOperationNumber'];
+		$purchaseAmount = $arrayOut['purchaseAmount'];
+		$purchaseCurrencyCode = $arrayOut['purchaseCurrencyCode'];
+		$authorizationResult = $arrayOut['authorizationResult'];
+		$errorCode = $arrayOut['errorCode'];
+		$errorMessage = $arrayOut['errorMessage'];
+
+		// We need to verify that the purchaseOperationNumber is still equal to the session order_id.
+		if (isset($order->order_id) && isset($purchaseOperationNumber)) {
+    	if (($order->order_id) != ($purchaseOperationNumber)) {
+	  		watchdog('Alignet VPOS', 'Order ID @order_id did not equal V-POS OperationNumber.', array('@order_id' => $purchaseOperationNumber), WATCHDOG_WARNING, l(t('view'), 'admin/store/orders/'. $purchaseOperationNumber));
+	  		_alignet_vpos_checkout_error();
+    	}
+		}
+
+		// Validate $purchaseAmount against $order->order_total.
+  	// Sanitize the $purchaseAmount value as the send the value was change as required by the gateway.
+	  if (abs($purchaseAmount != $order->order_total)) {
+	  	// Sanitize $purchaseAmount
+	    $purchaseAmount = $purchaseAmount / 100;
+			if (abs($purchaseAmount - $order->order_total) > 0.01) {
+			  watchdog('Alignet VPOS', 'Payment for order @order_id did not equal the order total.', array('@order_id' => $order->order_id), WATCHDOG_WARNING, l(t('view'), 'admin/store/orders/'. $order->order_id));
+			  _alignet_vpos_checkout_error();
+			}
+	  }
+	  
+	  // Validation and function redirection based on the results of $authorizationResult.
+	  switch ($authorizationResult) {
+	  	case 05:
+	  		
+	  		if ($errorCode==2300) {
+	  			alignet_vpos_checkout_cancel($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  			break;
+	  		}
+	  		if ($errorCode==2400) {
+	    		alignet_vpos_checkout_vpos_rejected($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	    		break;
+	  		}
+	  	
+	  	case 01:
+	  		
+	  		alignet_vpos_checkout_denied($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  		break;
+	  	
+	  	case 00:
+	  		
+	  		alignet_vpos_checkout_completed($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  		break;
+
+	  	default:	
+	  		alignet_vpos_checkout_error($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  		break;
+	  }
+
+	  /*
+	  if ($authorizationResult==05 && $errorCode==2300) {
+	    alignet_vpos_checkout_cancel($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  }
+	  elseif ($authorizationResult==05 && $errorCode==2400) {
+	    alignet_vpos_checkout_vpos_rejected($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  }
+	  elseif ($authorizationResult==01) {
+	    alignet_vpos_checkout_denied($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  }
+	  elseif ($authorizationResult==00) {
+	    alignet_vpos_checkout_completed($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  }
+	  else {
+	  	alignet_vpos_checkout_error($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+	  }
+  }
+  else {
+    // For some reason non-compliant information was received from the Gateway.  	
+		alignet_vpos_checkout_error($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage);
+  }
+  */
+  return;
+}
+
+/**
+ * Completes the sale and finishes checkout.
+ */
+function alignet_vpos_checkout_completed($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage){
+  global $user;
+	
+	// Gateway Reporting: Show error information sent by the gateway.
+  if (variable_get('alignet_vpos_gateway_reporting')==1 && user_access('administer alignet vpos')) {
+    drupal_set_message(t('Alignet VPOS errorCode: @error_code and errorMessage: @error_msg with authorizationResult: @auth_result  ', array('@error_code' => $errorCode, '@error_msg' => $errorMessage, '@auth_result' => $authorizationResult, '@auth_code' => $authorizationCode)));
+  }
+	
+  $_SESSION['uc_checkout'][$_SESSION['cart_order']]['do_complete'] = TRUE;
+	
+  // Display messages to customers and the administrator if the order was lost.
+  if (empty($order)) {
+    drupal_set_message(t('VPOS: We are sorry, an error occurred while processing your order that prevents us from completing it at this time. Your credit card has been charged, please contact us and we will resolve the issue as soon as possible.'), 'error');
+    watchdog('uc_cart', 'An empty order made it to checkout! Cart order ID: @cart_order', array('@cart_order' => $_SESSION['cart_order']), WATCHDOG_ERROR);
+    drupal_goto('cart');
+  }
+	
+  // Enter in payment with comment
+  $comment = t('VPOS Transaction ID: @txn_id. Message: @msg.', array('@txn_id' => $authorizationCode, '@msg' => $errorMessage));
+	uc_payment_enter($order->order_id, 'alignet_vpos_gateway', $order->order_total, $order->uid, NULL, $comment);
+  drupal_goto('cart/checkout/complete');
+}
+
+/**
+ * Handles a denied payment by the gateway.
+ */
+function alignet_vpos_checkout_denied($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage) {
+  global $user;
+  
+  // Gateway Reporting: Show error information sent by the gateway.
+  if (variable_get('alignet_vpos_gateway_reporting')==1 && user_access('administer alignet vpos')) {
+    drupal_set_message(t('Alignet VPOS errorCode: @error_code and errorMessage: @error_msg with authorizationResult: @auth_result and authorizationCode: @auth_code', array('@error_code' => $errorCode, '@error_msg' => $errorMessage, '@auth_result' => $authorizationResult, '@auth_code' => $authorizationCode)));
+  }
+
+  uc_order_comment_save($order->order_id, 0, t("Payment was denied by customer's banking institution."), 'admin');
+  unset($_SESSION['cart_order']);
+  drupal_set_message(t('Your payment was denied by your banking institution. Please contact them for further assistance.'));
+  $order_id = $order->order_id;
+  uc_order_update_status($order_id, 'canceled');
+  uc_cart_empty();
+  drupal_goto('<front>');
+}
+
+/**
+ * Handles a cancelled payment by the user.
+ */
+function alignet_vpos_checkout_cancel($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage) {
+	global $user;
+
+  // Gateway Reporting: Show error information sent by the gateway.
+  if (variable_get('alignet_vpos_gateway_reporting')==1 && user_access('administer alignet vpos')) {
+    drupal_set_message(t('Alignet VPOS errorCode: @error_code and errorMessage: @error_msg with authorizationResult: @auth_result  ', array('@error_code' => $errorCode, '@error_msg' => $errorMessage, '@auth_result' => $authorizationResult, '@auth_code' => $authorizationCode)));
+  }
+
+  uc_order_comment_save($order->order_id, 0, t("Order was cancelled by customer."), 'admin');
+  drupal_set_message(t('Your payment was cancelled. Please feel free to continue shopping or contact us for assistance.'));
+  unset($_SESSION['cart_order']);
+  $order_id = $order->order_id;
+  uc_order_update_status($order_id, 'canceled');
+  uc_cart_empty();
+  drupal_goto('<front>');
+}
+
+/**
+ * Handles a rejected payment by the user.
+ */
+function alignet_vpos_checkout_vpos_rejected($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage) {
+  global $user;
+
+  if(empty($authorizationCode)) {
+    $authorizationCode == '';
+  }
+	
+  if(empty($authorizationResult)) {
+    $authorizationResult == '';
+  }
+
+  // Gateway Reporting: Show error information sent by the gateway.
+  if (variable_get('alignet_vpos_gateway_reporting')==1 && user_access('administer alignet vpos')) {
+    drupal_set_message(t('Alignet VPOS errorCode: @error_code and errorMessage: @error_msg with authorizationResult: @auth_result  ', array('@error_code' => $errorCode, '@error_msg' => $errorMessage, '@auth_result' => $authorizationResult, '@auth_code' => $authorizationCode)));
+  }
+
+  uc_order_comment_save($order->order_id, 0, t("Order was cancelled by customer."), 'admin');
+  drupal_set_message(t('Your payment was cancelled. Please feel free to continue shopping or contact us for assistance.'));
+  unset($_SESSION['cart_order']);
+  $order_id = $order->order_id;
+  uc_order_update_status($order_id, 'canceled');	
+  uc_cart_empty();
+  drupal_goto('<front>');
+}
+
+/**
+ * Handles an error message on payment.
+ */
+function alignet_vpos_checkout_error($order, $authorizationResult, $authorizationCode, $errorCode, $errorMessage) {
+  global $user;
+
+  
+	// Gateway Reporting: Show error information sent by the gateway.
+  if (variable_get('alignet_vpos_gateway_reporting')==1 && user_access('administer alignet vpos')) {  
+  	drupal_set_message(t('Alignet VPOS errorCode: @error_code. errorMessage: @error_msg. authorizationCode: @auth_code and authorizationResult: @auth_result ', array('@error_code' => $errorCode, '@error_msg' => $errorMessage, '@auth_code' => $authorizationCode, '@auth_result' => $authorizationResult)));
+  }
+
+  uc_order_comment_save($order->order_id, 0, t("Error in fulfilling payment."), 'admin');
+  unset($_SESSION['cart_order']);
+  drupal_set_message(t('There was an error in fulfilling your payment. Please feel free to try again or contact us for assistance.'));
+  uc_cart_empty();
+  drupal_goto('<front>');
+}
+
+/**
+ * Returns an array of possible currency codes.
+ */
+function _alignet_vpos_currency_array() {
+  return array(840 => t('USD'), 604 => t('Peruvian Nuevo Sol'));
+}
+
+/**
+ * Get the location of VPOS Plugin.
+ *
+ * @return
+ *   The location of the plugin, or FALSE if it isn't installed.
+ */
+function alignet_get_plugin_path() {
+	$path = FALSE;
+	
+	if (file_exists('sites/all/modules/alignet_vpos/plugins/vpos_plugin.php')) {
+		$path = 'sites/all/modules/alignet_vpos/plugins/';
+	}
+	return $path;
+}

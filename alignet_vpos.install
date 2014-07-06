@@ -1,0 +1,51 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the Alignet V-POS module.
+ */
+
+/**
+ * Implements hook_requirements($phase).
+ */
+function alignet_vpos_requirements($phase) {
+
+	$requirements = array();	
+
+	if ($phase == 'install') {
+		
+		$description = NULL;
+	
+		// Load value of TRUE/FALSE
+		$mcrypt = extension_loaded('mcrypt');
+	
+	
+		if($mcrypt == 1){
+			$value = t('Enabled');
+			$description = t('Your server meets the requirements for the Alignet V-POS installation.');
+			$severity = REQUIREMENT_OK;
+		}
+		else{
+			$value = t('Not enabled');
+			$description = t('Your server does not have enabled the required libraries. Alignet V-POS requires the PHP mcrypt library.');
+			$severity = REQUIREMENT_ERROR;
+		}
+		
+		$requirements['alignet_vpos'] = array(
+			'title' => t('Alignet V-POS'),
+			'value' => $value,
+			'severity' => $severity,
+			'description' => $description,
+		);
+	}
+	return $requirements;
+}
+ 
+/**
+ * Implements hook_uninstall().
+ */
+function alignet_vpos_uninstall() {
+  db_delete('variable')
+    ->condition('name', 'alignet_vpos_%', 'LIKE')
+    ->execute();
+}
